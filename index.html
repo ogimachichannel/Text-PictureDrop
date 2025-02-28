@@ -9,21 +9,33 @@
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-storage-compat.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <style>
-        body { font-family: "Rounded Mplus 1c", sans-serif; text-align: center; margin: 20px; background-color: #f5e1c8; }
+        body { font-family: 'Rounded Mplus 1c', sans-serif; text-align: center; margin: 20px; background-color: #f5e1c8; }
         textarea { width: 90%; height: 200px; margin-top: 10px; font-size: 16px; }
-        #qrcode, #imageContainer { margin-top: 20px; display: inline-block; }
-        #imagePreview { max-width: 90%; height: auto; margin-top: 10px; }
+        #qrcode { margin-top: 20px; display: inline-block; }
+        .container { display: flex; flex-direction: column; align-items: center; }
+        .image-section { display: flex; flex-direction: column; align-items: center; margin-top: 20px; }
+        .image-preview { max-width: 90%; margin-top: 10px; cursor: pointer; }
+        @media (min-width: 768px) {
+            .container { flex-direction: row; justify-content: space-between; }
+            .image-section { width: 50%; }
+            .text-section { width: 50%; }
+        }
     </style>
 </head>
 <body>
     <h1>テキストドロップ</h1>
     <div id="qrcode"></div>
     <p id="sessionIdDisplay"></p>
-    <textarea id="sharedText" placeholder="ここにテキストを入力..."></textarea>
-    <input type="file" id="imageInput" accept="image/*">
-    <button id="uploadButton">画像をアップロード</button>
-    <div id="imageContainer"></div>
-
+    <div class="container">
+        <div class="text-section">
+            <textarea id="sharedText" placeholder="ここにテキストを入力..."></textarea>
+        </div>
+        <div class="image-section">
+            <input type="file" id="imageInput" accept="image/*">
+            <button id="uploadButton">画像をアップロード</button>
+            <img id="sharedImage" class="image-preview" style="display:none;" alt="共有画像">
+        </div>
+    </div>
     <script>
         document.addEventListener("DOMContentLoaded", async function() {
             const firebaseConfig = {
@@ -35,66 +47,79 @@
                 appId: "1:1003920001497:web:e7fe245971b54e808371c8",
                 measurementId: "G-2WV05QX9JX"
             };
-
+            
             if (!firebase.apps.length) {
                 firebase.initializeApp(firebaseConfig);
             }
             const db = firebase.firestore();
             const storage = firebase.storage();
-
+            
             const textArea = document.getElementById("sharedText");
             const qrCodeElement = document.getElementById("qrcode");
             const sessionIdDisplay = document.getElementById("sessionIdDisplay");
             const imageInput = document.getElementById("imageInput");
             const uploadButton = document.getElementById("uploadButton");
-            const imageContainer = document.getElementById("imageContainer");
-
+            const sharedImage = document.getElementById("sharedImage");
+            
             const urlParams = new URLSearchParams(window.location.search);
             let sessionId = urlParams.get("session");
-
+            
             if (!sessionId) {
                 sessionId = Math.random().toString(36).substring(2, 8);
                 window.history.replaceState(null, "", `?session=${sessionId}`);
             }
-
+            
             sessionIdDisplay.textContent = `セッションID: ${sessionId}`;
             const docRef = db.collection("sessions").doc(sessionId);
-
+            const storageRef = storage.ref(`images/${sessionId}.jpg`);
+            
             docRef.onSnapshot((doc) => {
                 if (doc.exists) {
                     textArea.value = doc.data().content || "";
                     if (doc.data().imageUrl) {
-                        displayImage(doc.data().imageUrl);
+                        sharedImage.src = doc.data().imageUrl;
+                        sharedImage.style.display = "block";
                     }
                 }
             }, (error) => {
                 console.error("Firestoreのデータ取得エラー: ", error);
             });
-
+            
             textArea.addEventListener("input", () => {
                 docRef.set({ content: textArea.value }, { merge: true }).catch(error => {
                     console.error("Firestoreの書き込みエラー: ", error);
                 });
             });
-
+            
             uploadButton.addEventListener("click", () => {
-                const file = imageInput.files[0];
-                if (file) {
-                    const storageRef = storage.ref(`images/${sessionId}/${file.name}`);
-                    storageRef.put(file).then(snapshot => {
-                        return snapshot.ref.getDownloadURL();
-                    }).then(url => {
+                if (imageInput.files.length > 0) {
+                    const file = imageInput.files[0];
+                    const uploadTask = storageRef.put(file);
+                    
+                    uploadTask.then(snapshot => snapshot.ref.getDownloadURL()).then(url => {
                         docRef.set({ imageUrl: url }, { merge: true });
                     }).catch(error => {
                         console.error("画像アップロードエラー: ", error);
                     });
                 }
             });
-
-            function displayImage(url) {
-                imageContainer.innerHTML = `<img id="imagePreview" src="${url}" alt="Shared Image">`;
-            }
-
+            
+            sharedImage.addEventListener("contextmenu", (e) => {
+                e.preventDefault();
+                const link = document.createElement("a");
+                link.href = sharedImage.src;
+                link.download = "shared-image.jpg";
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            });
+            
+            sharedImage.addEventListener("touchstart", () => {
+                navigator.clipboard.writeText(sharedImage.src).then(() => {
+                    alert("画像URLをコピーしました。長押しで保存してください。");
+                });
+            });
+            
             try {
                 new QRCode(qrCodeElement, {
                     text: window.location.href,
